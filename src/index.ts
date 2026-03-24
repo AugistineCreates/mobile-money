@@ -27,6 +27,8 @@ import {
 
 import { register } from "./utils/metrics";
 import { metricsMiddleware } from "./middleware/metrics";
+import { responseTime } from "./middleware/responseTime";
+import { startJobs } from "./jobs/scheduler";
 import { startApolloServer } from "./graphql/server";
 
 dotenv.config();
@@ -52,6 +54,7 @@ app.use(
 app.use(cors());
 app.use(express.json());
 app.use(limiter);
+app.use(responseTime);
 
 // Prometheus metrics endpoint
 app.get("/metrics", async (req, res) => {
@@ -149,6 +152,7 @@ async function startHttp(): Promise<void> {
 
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
+    startJobs();
   });
 }
 
