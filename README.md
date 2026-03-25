@@ -1,8 +1,8 @@
 # Mobile Money to Stellar Backend
 
 [![contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat)](https://github.com/sublime247/mobile-money/issues)
-[![codecov](https://codecov.io/gh/sublime247/mobile-money/branch/main/graph/badge.svg)](https://codecov.io/gh/sublime247/mobile-money)
-[![CI](https://github.com/sublime247/mobile-money/workflows/CI/badge.svg)](https://github.com/sublime247/mobile-money/actions)
+![CI](https://github.com/sublime247/mobile-money/actions/workflows/ci.yml/badge.svg)
+![Coverage](https://codecov.io/gh/sublime247/mobile-money/branch/main/graph/badge.svg)
 
 A backend service that bridges mobile money providers (MTN, Airtel, Orange) with the Stellar blockchain network.
 
@@ -57,6 +57,20 @@ npm start
 docker-compose up
 ```
 
+### Docker (Development)
+
+Starts the app with hot reload, a debugger on port `9229`, PostgreSQL, and Redis.
+
+```bash
+# Start
+npm run docker:dev
+
+# Stop
+npm run docker:dev:down
+```
+
+Attach a debugger (e.g. VS Code) to `localhost:9229`.
+
 ## Testing
 
 ### Run Tests
@@ -81,8 +95,9 @@ npm run test:watch
 
 ## API Endpoints
 
-### Health Check
-- `GET /health` - Service health status
+### Health Checks
+- `GET /health` - Service health status (liveness)
+- `GET /ready` - Readiness probe for Kubernetes (checks database and redis)
 
 ### Transactions
 - `POST /api/transactions/deposit` - Deposit from mobile money to Stellar
