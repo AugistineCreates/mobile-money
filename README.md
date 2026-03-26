@@ -12,6 +12,9 @@ A backend service that bridges mobile money providers (MTN, Airtel, Orange) with
 - Stellar blockchain integration
 - RESTful API and GraphQL (`/graphql`)
 - PostgreSQL database
+- Redis (for queues and locking)
+- Background processing (BullMQ)
+- Email notifications (Nodemailer)
 - Docker support
 - TypeScript
 
@@ -107,9 +110,9 @@ The system enforces daily transaction limits based on user KYC (Know Your Custom
 
 Before checking daily KYC limits, the system validates that each individual transaction falls within acceptable ranges:
 
-| Limit Type | Amount  | Purpose                                      |
-| ---------- | ------- | -------------------------------------------- |
-| Minimum    | 100 XAF | Prevents micro-transactions and spam         |
+| Limit Type | Amount        | Purpose                                        |
+| ---------- | ------------- | ---------------------------------------------- |
+| Minimum    | 100 XAF       | Prevents micro-transactions and spam           |
 | Maximum    | 1,000,000 XAF | Fraud prevention for single large transactions |
 
 These limits can be configured via environment variables:
@@ -161,6 +164,50 @@ If not specified, the system uses the default values shown above.
 
 When a transaction is rejected due to limit exceeded, the error response includes your current KYC level, remaining limit, and upgrade suggestions.
 
+## Provider-Specific Transaction Limits
+
+Different mobile money providers have different capabilities and risk profiles. The system enforces provider-specific transaction limits before checking KYC limits.
+
+### Default Limits
+
+| Provider | Minimum | Maximum       | Description                                     |
+| -------- | ------- | ------------- | ----------------------------------------------- |
+| MTN      | 100 XAF | 500,000 XAF   | Most common mobile money provider               |
+| Airtel   | 100 XAF | 1,000,000 XAF | Higher maximum for larger transactions          |
+| Orange   | 500 XAF | 750,000 XAF   | Slightly higher minimum due to network policies |
+
+### How Provider Limits Work
+
+1. **First Validation**: Each transaction is first checked against provider-specific min/max limits
+2. **Provider Detection**: The provider is determined from the transaction request (mtn, airtel, orange)
+3. **Clear Error Messages**: If rejected, the error includes the allowed range for that provider
+
+Example error message:
+
+```
+Amount 600 XAF is below the minimum of 500 XAF for ORANGE. Allowed range: 500 - 750000 XAF
+```
+
+### Configuration
+
+Provider limits can be customized via environment variables:
+
+```bash
+# MTN limits
+MTN_MIN_AMOUNT=100
+MTN_MAX_AMOUNT=500000
+
+# Airtel limits
+AIRTEL_MIN_AMOUNT=100
+AIRTEL_MAX_AMOUNT=1000000
+
+# Orange limits
+ORANGE_MIN_AMOUNT=500
+ORANGE_MAX_AMOUNT=750000
+```
+
+If not specified, the system uses the default values shown above.
+
 ## Git Hooks
 
 This project uses [Husky](https://typicode.github.io/husky/) to enforce code quality via Git hooks.
@@ -197,6 +244,18 @@ git commit -m "Your message" --no-verify
 - `POST /api/transactions/withdraw` - Withdraw from Stellar to mobile money
 - `GET /api/transactions/:id` - Get transaction status
 
+#### Transaction Idempotency
+
+Send an `Idempotency-Key` header on `POST /api/transactions/deposit` and
+`POST /api/transactions/withdraw` when the client may retry the same request.
+
+- duplicate requests with the same active key return the existing transaction
+  with HTTP `200`
+- keys remain active for `24` hours by default
+- expired keys are cleared during cleanup so they can be reused safely later
+- race conditions are still protected by the database unique index on
+  `transactions.idempotency_key`
+
 ### Statistics & Metrics
 
 - `GET /api/stats` - Get system-wide statistics (Total transactions, success rate, total volume, active users, and volume by provider).
@@ -227,22 +286,24 @@ src/
 ## API Documentation Updates
 
 ### Transaction History
+
 **Endpoint:** `GET /api/transactions`
 
 Allows users to view their transaction history with built-in pagination and date-range filtering.
 
 **Query Parameters:**
-| Parameter   | Type   | Description |
+| Parameter | Type | Description |
 | :---------- | :----- | :---------- |
 | `startDate` | string | ISO 8601 format (e.g., 2026-03-01). |
-| `endDate`   | string | ISO 8601 format (e.g., 2026-03-31). |
-| `page`      | number | The page number to retrieve (Default: 1). |
-| `limit`     | number | Number of transactions per page (Default: 10). |
+| `endDate` | string | ISO 8601 format (e.g., 2026-03-31). |
+| `page` | number | The page number to retrieve (Default: 1). |
+| `limit` | number | Number of transactions per page (Default: 10). |
 
 **Example Request:**
-`GET /api/transactions?startDate=2026-03-01&endDate=2026-03-31&page=1&limit=5`
+`GET /api/transactions?startDate=2026-03-01&endDate=2026-03-31&offset=0&limit=5`
 
 **Validation Rules:**
+
 - Returns `400 Bad Request` if the date format is not ISO 8601.
 - Returns `400 Bad Request` if `startDate` is a later date than `endDate`.
 
@@ -253,3 +314,19 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 
 MIT
+
+## Development seeds
+
+There is a small seed script to populate sample users and transactions for local development.
+
+Run (development only):
+
+```bash
+# Ensure you have a .env with DATABASE_URL and set NODE_ENV=development
+npm run seed
+```
+
+Notes:
+- Idempotent: repeated runs won't duplicate records (uses UPSERT / ON CONFLICT DO NOTHING).
+- Creates a few sample users and a mix of transactions (completed, pending, failed) across providers.
+- Intended for local/dev environments only; the script will exit if NODE_ENV !== development.
