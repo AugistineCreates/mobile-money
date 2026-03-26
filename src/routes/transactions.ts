@@ -3,6 +3,8 @@ import {
   depositHandler,
   withdrawHandler,
   getTransactionHandler,
+  validateTransaction,
+  getTransactionHistoryHandler,
   updateNotesHandler,
   searchTransactionsHandler,
 } from "../controllers/transactionController";
@@ -11,6 +13,23 @@ import { TimeoutPresets, haltOnTimedout } from "../middleware/timeout";
 
 export const transactionRoutes = Router();
 
+// Transaction history
+transactionRoutes.get(
+  "/",
+  TimeoutPresets.quick,
+  haltOnTimedout,
+  getTransactionHistoryHandler,
+);
+
+// Phone number search (must be before /:id to avoid route conflict)
+transactionRoutes.get(
+  "/search",
+  TimeoutPresets.quick,
+  haltOnTimedout,
+  searchTransactionsHandler,
+);
+
+// Deposit
 transactionRoutes.post(
   "/deposit",
   TimeoutPresets.long,
@@ -19,6 +38,7 @@ transactionRoutes.post(
   depositHandler,
 );
 
+// Withdraw
 transactionRoutes.post(
   "/withdraw",
   TimeoutPresets.long,
@@ -27,23 +47,19 @@ transactionRoutes.post(
   withdrawHandler,
 );
 
+// Get single transaction
 transactionRoutes.get(
-  "/:id",
+  "/",
   TimeoutPresets.quick,
   haltOnTimedout,
-  getTransactionHandler,
+  validateTransactionFilters,
+  listTransactionsHandler,
 );
 
+// Update notes
 transactionRoutes.patch(
   "/:id/notes",
   TimeoutPresets.quick,
   haltOnTimedout,
   updateNotesHandler,
-);
-
-transactionRoutes.get(
-  "/search",
-  TimeoutPresets.quick,
-  haltOnTimedout,
-  searchTransactionsHandler,
 );

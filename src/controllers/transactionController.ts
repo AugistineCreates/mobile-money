@@ -1,11 +1,7 @@
 import { Request, Response } from "express";
 import { MobileMoneyService } from "../services/mobilemoney/mobileMoneyService";
-import { StellarService } from "../services/stellar/stellarService";
-import {
-  Transaction,
-  TransactionModel,
-  TransactionStatus,
-} from "../models/transaction";
+import { TransactionModel, TransactionStatus } from "../models/transaction";
+import { pool } from "../config/database";
 import { lockManager, LockKeys } from "../utils/lock";
 import { TransactionLimitService } from "../services/transactionLimit/transactionLimitService";
 import { KYCService } from "../services/kyc/kycService";
@@ -27,31 +23,98 @@ const transactionLimitService = new TransactionLimitService(
   transactionModel,
 );
 
-type TransactionRequestType = "deposit" | "withdraw";
+// ------------------ Validation Middleware ------------------
+export const transactionSchema = z.object({
+  amount: z.number().positive({ message: "Amount must be a positive number" }),
+  phoneNumber: z
+    .string()
+    .regex(/^\+?\d{10,15}$/, { message: "Invalid phone number format" }),
+  provider: z.enum(["mtn", "airtel", "orange"], {
+    message: "Provider must be one of: mtn, airtel, orange",
+  }),
+  stellarAddress: z
+    .string()
+    .regex(/^G[A-Z2-7]{55}$/, { message: "Invalid Stellar address format" }),
+  userId: z.string().nonempty({ message: "userId is required" }),
+});
 
-interface CreateTransactionResponse {
-  transactionId: string;
-  referenceNumber: string;
-  status: TransactionStatus;
-  jobId: string;
-}
+export const validateTransaction = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    transactionSchema.parse(req.body);
+    next();
+  } catch (err: any) {
+    const message =
+      err.errors?.map((e: any) => e.message).join(", ") || "Invalid input";
+    return res.status(400).json({ error: message });
+  }
+};
 
-function getRequestAmount(value: unknown): number {
-  const parsed =
-    typeof value === "number"
-      ? value
-      : typeof value === "string"
-        ? Number(value)
-        : Number.NaN;
+// ------------------ New History Handler (Issue #21) ------------------
 
-  return parsed;
-}
+export const getTransactionHistoryHandler = async (req: Request, res: Response) => {
+  try {
+    const { startDate, endDate, offset = "0", limit = "20" } = req.query;
 
-function getIdempotencyKey(req: Request): string | null {
-  const key = req.header("Idempotency-Key")?.trim();
+    // 1. Validate ISO 8601 Format
+    const isValidISO = (dateStr: any) => {
+      if (!dateStr) return true;
+      // Strict YYYY-MM-DD check
+      const regex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!regex.test(dateStr)) return false;
+      const d = new Date(dateStr as string);
+      return !isNaN(d.getTime());
+    };
 
-  if (!key) {
-    return null;
+    if (!isValidISO(startDate) || !isValidISO(endDate)) {
+      return res.status(400).json({
+        error: "Invalid date format. Please use ISO 8601 (YYYY-MM-DD)",
+      });
+    }
+
+    // 2. Validate Date Logic
+    if (
+      startDate &&
+      endDate &&
+      new Date(startDate as string) > new Date(endDate as string)
+    ) {
+      return res
+        .status(400)
+        .json({ error: "startDate cannot be greater than endDate" });
+    }
+
+    // 3. Prepare Pagination
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit as string) || 20));
+    const offsetNum = Math.max(0, parseInt(offset as string) || 0);
+
+    // 4. Fetch Data using Model
+    const [transactions, total] = await Promise.all([
+      transactionModel.list(
+        limitNum,
+        offsetNum,
+        startDate as string,
+        endDate as string,
+      ),
+      transactionModel.count(startDate as string, endDate as string),
+    ]);
+
+    res.json({
+      data: transactions,
+      pagination: {
+        total,
+        limit: limitNum,
+        offset: offsetNum,
+        hasMore: offsetNum + limitNum < total,
+      },
+    });
+  } catch (error) {
+    console.error("History Fetch Error:", error);
+    res
+      .status(500)
+      .json({ error: "Failed to fetch transaction history from database" });
   }
 
   if (key.length > 255) {
@@ -259,13 +322,6 @@ export const getTransactionHandler = async (req: Request, res: Response) => {
 
       if (diffMinutes > timeoutMinutes) {
         await transactionModel.updateStatus(id, TransactionStatus.Failed);
-
-        console.log("Transaction timed out (on fetch)", {
-          transactionId: id,
-          timeoutMinutes,
-          reason: "Transaction timeout",
-        });
-
         transaction.status = TransactionStatus.Failed;
         return res.json({
           ...transaction,
@@ -289,7 +345,6 @@ export const cancelTransactionHandler = async (req: Request, res: Response) => {
     const transaction = await transactionModel.findById(id);
     if (!transaction) {
       return res.status(404).json({ error: "Transaction not found" });
-    }
 
     if (transaction.status !== TransactionStatus.Pending) {
       return res.status(400).json({
@@ -395,16 +450,93 @@ export const searchTransactionsHandler = async (
   res: Response,
 ) => {
   try {
-    const { q } = req.query;
+    const { phoneNumber, page = "1", limit = "50" } = req.query;
 
-    if (!q || typeof q !== "string") {
-      return res.status(400).json({ error: "Query parameter 'q' is required" });
+    if (!phoneNumber || typeof phoneNumber !== "string") {
+      return res.status(400).json({ error: "phoneNumber query parameter is required" });
     }
 
-    const transactions = await transactionModel.searchByNotes(q);
-    return res.json(transactions);
+    const sanitized = phoneNumber.trim();
+
+    // Only allow digits with an optional leading +
+    if (!/^\+?\d{1,20}$/.test(sanitized)) {
+      return res
+        .status(400)
+        .json({ error: "Invalid phone number format. Use digits only, optional leading +" });
+    }
+
+    const pageNum = Math.max(1, parseInt(page as string) || 1);
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit as string) || 50));
+    const offset = (pageNum - 1) * limitNum;
+
+    const { transactions, total } = await transactionModel.searchByPhoneNumber(
+      sanitized,
+      limitNum,
+      offset,
+    );
+
+    // Mask phone numbers — only expose last 4 digits for privacy
+    const masked = transactions.map((tx: any) => ({
+      ...tx,
+      phone_number: tx.phone_number
+        ? `****${tx.phone_number.slice(-4)}`
+        : tx.phone_number,
+    }));
+
+    res.json({
+      success: true,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+      },
+      data: masked,
+    });
+  } catch (error) {
+    console.error("Phone number search error:", error);
+    res.status(500).json({ error: "Failed to search transactions" });
+  }
+};
+
+/**
+ * List transactions with status filtering and pagination
+ * Supports: ?status=pending or ?status=pending,completed&limit=50&offset=0
+ */
+export const listTransactionsHandler = async (req: Request, res: Response) => {
+  try {
+    const filters = (req as any).transactionFilters || {
+      statuses: [],
+      limit: 50,
+      offset: 0,
+    };
+
+    // Get total count
+    const totalCount = await transactionModel.countByStatuses(filters.statuses);
+
+    // Get paginated transactions
+    const transactions = await transactionModel.findByStatuses(
+      filters.statuses,
+      filters.limit,
+      filters.offset,
+    );
+
+    res.json({
+      data: transactions,
+      pagination: {
+        total: totalCount,
+        limit: filters.limit,
+        offset: filters.offset,
+        hasMore: filters.offset + filters.limit < totalCount,
+        totalPages: Math.ceil(totalCount / filters.limit),
+        currentPage: Math.floor(filters.offset / filters.limit) + 1,
+      },
+      filters: {
+        statuses: filters.statuses,
+      },
+    });
   } catch (err) {
-    console.error("Search failed:", err);
-    return res.status(500).json({ error: "Search failed" });
+    console.error("Failed to list transactions:", err);
+    res.status(500).json({ error: "Failed to list transactions" });
   }
 };

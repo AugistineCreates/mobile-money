@@ -52,11 +52,12 @@ export interface Transaction {
   stellarAddress: string;
   status: TransactionStatus;
   tags: string[];
-  notes?: string | null;
-  adminNotes?: string | null;
-  userId?: string | null;
-  idempotencyKey?: string | null;
-  idempotencyExpiresAt?: Date | null;
+  notes?: string;
+  admin_notes?: string;
+  webhook_delivery_status?: "pending" | "delivered" | "failed" | "skipped";
+  webhook_last_attempt_at?: Date | null;
+  webhook_delivered_at?: Date | null;
+  webhook_last_error?: string | null;
   createdAt: Date;
   updatedAt?: Date | null;
 }
@@ -73,6 +74,13 @@ export interface CreateTransactionInput {
   userId?: string | null;
   idempotencyKey?: string | null;
   idempotencyExpiresAt?: Date | null;
+}
+
+export interface WebhookDeliveryUpdate {
+  status: "pending" | "delivered" | "failed" | "skipped";
+  lastAttemptAt?: Date | null;
+  deliveredAt?: Date | null;
+  lastError?: string | null;
 }
 
 export class TransactionModel {
@@ -128,25 +136,75 @@ export class TransactionModel {
     return result.rows[0] || null;
   }
 
-  async list(limit = 50, offset = 0): Promise<Transaction[]> {
+  /** Paginated list, newest first. `limit` is capped at 100. */
+  async list(limit = 50, offset = 0, startDate?: string, endDate?: string): Promise<Transaction[]> {
     const capped = Math.min(Math.max(limit, 1), 100);
     const off = Math.max(offset, 0);
+    
+    let query = "SELECT * FROM transactions WHERE 1=1";
+    const params: any[] = [];
+    let paramIndex = 1;
 
-    const result = await pool.query<Transaction>(
-      `SELECT ${TRANSACTION_SELECT_COLUMNS}
-       FROM transactions
-       ORDER BY created_at DESC
-       LIMIT $1 OFFSET $2`,
-      [capped, off],
-    );
+    if (startDate) {
+      query += ` AND created_at >= $${paramIndex++}`;
+      params.push(new Date(startDate).toISOString());
+    }
+    if (endDate) {
+      query += ` AND created_at <= $${paramIndex++}`;
+      params.push(new Date(endDate).toISOString());
+    }
 
+    query += ` ORDER BY created_at DESC LIMIT $${paramIndex++} OFFSET $${paramIndex++}`;
+    params.push(capped, off);
+
+    const result = await pool.query(query, params);
     return result.rows;
+  }
+
+  async count(startDate?: string, endDate?: string): Promise<number> {
+    let query = "SELECT COUNT(*) FROM transactions WHERE 1=1";
+    const params: any[] = [];
+    let paramIndex = 1;
+
+    if (startDate) {
+      query += ` AND created_at >= $${paramIndex++}`;
+      params.push(new Date(startDate).toISOString());
+    }
+    if (endDate) {
+      query += ` AND created_at <= $${paramIndex++}`;
+      params.push(new Date(endDate).toISOString());
+    }
+
+    const result = await pool.query(query, params);
+    return parseInt(result.rows[0].count);
   }
 
   async updateStatus(id: string, status: TransactionStatus): Promise<void> {
     await pool.query(
       "UPDATE transactions SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
       [status, id],
+    );
+  }
+
+  async updateWebhookDelivery(
+    id: string,
+    delivery: WebhookDeliveryUpdate,
+  ): Promise<void> {
+    await pool.query(
+      `UPDATE transactions
+       SET webhook_delivery_status = $1,
+           webhook_last_attempt_at = $2,
+           webhook_delivered_at = $3,
+           webhook_last_error = $4,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $5`,
+      [
+        delivery.status,
+        delivery.lastAttemptAt ?? null,
+        delivery.deliveredAt ?? null,
+        delivery.lastError ?? null,
+        id,
+      ],
     );
   }
 
@@ -283,47 +341,39 @@ export class TransactionModel {
     return result.rows;
   }
 
-  async findActiveByIdempotencyKey(key: string): Promise<Transaction | null> {
-    const result = await pool.query<Transaction>(
-      `SELECT ${TRANSACTION_SELECT_COLUMNS}
-       FROM transactions
-       WHERE idempotency_key = $1
-         AND (
-           idempotency_expires_at IS NULL
-           OR idempotency_expires_at > CURRENT_TIMESTAMP
-         )
+  /**
+   * Search transactions by phone number with partial matching support.
+   * Uses LIKE with parameterised queries — safe against SQL injection.
+   * Partial input (e.g. last 4 digits) is matched against the end of the number.
+   */
+  async searchByPhoneNumber(
+    phoneNumber: string,
+    limit = 50,
+    offset = 0,
+  ): Promise<{ transactions: Transaction[]; total: number }> {
+    const capped = Math.min(Math.max(limit, 1), 100);
+    const off = Math.max(offset, 0);
+
+    // Partial match: if fewer than 7 digits, match the suffix; otherwise full LIKE
+    const pattern =
+      phoneNumber.replace(/^\+/, "").length < 7
+        ? `%${phoneNumber}`
+        : `%${phoneNumber}%`;
+
+    const countResult = await pool.query(
+      "SELECT COUNT(*)::int AS total FROM transactions WHERE phone_number LIKE $1",
+      [pattern],
+    );
+    const total: number = countResult.rows[0].total;
+
+    const result = await pool.query(
+      `SELECT * FROM transactions
+       WHERE phone_number LIKE $1
        ORDER BY created_at DESC
-       LIMIT 1`,
-      [key],
+       LIMIT $2 OFFSET $3`,
+      [pattern, capped, off],
     );
 
-    return result.rows[0] || null;
-  }
-
-  async releaseExpiredIdempotencyKey(key: string): Promise<number> {
-    const result = await pool.query(
-      `UPDATE transactions
-       SET idempotency_key = NULL,
-           idempotency_expires_at = NULL,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE idempotency_key = $1
-         AND idempotency_expires_at <= CURRENT_TIMESTAMP`,
-      [key],
-    );
-
-    return result.rowCount ?? 0;
-  }
-
-  async releaseAllExpiredIdempotencyKeys(): Promise<number> {
-    const result = await pool.query(
-      `UPDATE transactions
-       SET idempotency_key = NULL,
-           idempotency_expires_at = NULL,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE idempotency_key IS NOT NULL
-         AND idempotency_expires_at <= CURRENT_TIMESTAMP`,
-    );
-
-    return result.rowCount ?? 0;
+    return { transactions: result.rows, total };
   }
 }
