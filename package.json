@@ -21,6 +21,7 @@
     "migrate:down": "tsx src/scripts/migrate.ts down",
     "migrate:create": "tsx src/scripts/migrate.ts create",
     "migrate:status": "tsx src/scripts/migrate.ts status",
+  "seed": "tsx src/scripts/seed.ts",
     "postinstall": "npm run prepare"
   },
   "lint-staged": {

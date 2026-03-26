@@ -284,3 +284,19 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 
 MIT
+
+## Development seeds
+
+There is a small seed script to populate sample users and transactions for local development.
+
+Run (development only):
+
+```bash
+# Ensure you have a .env with DATABASE_URL and set NODE_ENV=development
+npm run seed
+```
+
+Notes:
+- Idempotent: repeated runs won't duplicate records (uses UPSERT / ON CONFLICT DO NOTHING).
+- Creates a few sample users and a mix of transactions (completed, pending, failed) across providers.
+- Intended for local/dev environments only; the script will exit if NODE_ENV !== development.
