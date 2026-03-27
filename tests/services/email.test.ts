@@ -5,11 +5,11 @@ jest.mock("@sendgrid/mail");
 
 describe("EmailService", () => {
   let emailService: EmailService;
-  let mockSend: jest.Mock;
+  let mockSendMail: jest.Mock;
 
   beforeEach(() => {
-    mockSend = jest.fn().mockResolvedValue([{ statusCode: 202 }]);
-    (sgMail.send as jest.Mock) = mockSend;
+    mockSendMail = jest.fn().mockResolvedValue([{ statusCode: 202 }]);
+    (sgMail.send as jest.Mock) = mockSendMail;
 
     // Reset env
     process.env.NODE_ENV = "development";
@@ -42,7 +42,7 @@ describe("EmailService", () => {
       mockTransaction
     );
 
-    expect(mockSend).toHaveBeenCalledWith(
+    expect(mockSendMail).toHaveBeenCalledWith(
       expect.objectContaining({
         to: "user@example.com",
         templateId: "receipt-template-id",
@@ -74,7 +74,7 @@ describe("EmailService", () => {
       "Insufficient funds"
     );
 
-    expect(mockSend).toHaveBeenCalledWith(
+    expect(mockSendMail).toHaveBeenCalledWith(
       expect.objectContaining({
         to: "user@example.com",
         templateId: "failure-template-id",
@@ -95,6 +95,6 @@ describe("EmailService", () => {
       dynamicTemplateData: {},
     });
 
-    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockSendMail).not.toHaveBeenCalled();
   });
 });
