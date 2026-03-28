@@ -7,7 +7,12 @@ import { createZipFile } from "../utils/create-zip-file";
 import { logAuditEvent } from "../utils/log-audit-event";
 import { AuditLog, auditService } from "./auditlogService";
 import { TransactionService } from "./transanctionService";
-import { getUserById, updateUserById, User } from "./userService";
+import {
+  deactivateUserAccount,
+  getUserById,
+  updateUserById,
+  User,
+} from "./userService";
 
 export class GDPRService {
   private txService: TransactionService;
@@ -130,5 +135,7 @@ export class GDPRService {
     }
   }
 
-  private async deactivateUserAccount(userId: string) {}
+  private async deactivateUserAccount(userId: string) {
+    await deactivateUserAccount(userId);
+  }
 }
