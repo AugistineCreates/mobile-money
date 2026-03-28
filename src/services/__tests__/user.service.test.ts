@@ -99,5 +99,29 @@ describe("deactivateUserAccount", () => {
 
       expect(mockClient.release).toHaveBeenCalled();
     });
+
+    it("should rollback on error", async () => {
+      const userId = "user-error";
+
+      (pool.query as jest.Mock).mockResolvedValueOnce({
+        rows: [{ id: userId }],
+        rowCount: 1,
+      });
+
+      mockClient.query
+        .mockResolvedValueOnce(undefined) // BEGIN
+        .mockRejectedValueOnce(new Error("DB Error")); // users UPDATE fails
+
+      mockClient.query.mockResolvedValueOnce(undefined); // ROLLBACK
+
+      await expect(deactivateUserAccount(userId)).rejects.toThrow("DB Error");
+
+      const rollbackCall = mockClient.query.mock.calls.find((call: any[]) =>
+        call.includes("ROLLBACK"),
+      );
+
+      expect(rollbackCall).toBeDefined();
+      expect(mockClient.release).toHaveBeenCalled();
+    });
   });
 });
