@@ -1,4 +1,6 @@
 import { Pool, QueryConfig, QueryResult, QueryResultRow, PoolClient } from "pg";
+import { isReadOnlyQuery } from "../utils/readOnlyDetector";
+
 
 // Configuration for slow query logging
 const SLOW_QUERY_THRESHOLD_MS = parseInt(
@@ -270,4 +272,24 @@ export async function checkReplicaHealth(): Promise<
       }
     }),
   );
+}
+
+/**
+ * Smart query router: automatically detects read-only (SELECT) queries and
+ * routes them to replica pools, while routing writes (INSERT/UPDATE/DELETE) to primary.
+ * This enables transparent replica usage without changing existing code patterns.
+ *
+ * @param text   - The parameterised SQL query string
+ * @param params - Optional query parameters
+ */
+export async function querySmart<T extends import("pg").QueryResultRow = any>(
+  text: string,
+  params?: unknown[],
+): Promise<import("pg").QueryResult<T>> {
+  // Auto-detect if this is a read-only query
+  if (isReadOnlyQuery(text)) {
+    return queryRead<T>(text, params);
+  } else {
+    return queryWrite<T>(text, params);
+  }
 }
