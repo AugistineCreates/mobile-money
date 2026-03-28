@@ -20,8 +20,8 @@ export const tokenController = {
 
     return result.rows;
   },
-  // List token by its Id
-  delete: async (req: Request, res: Response) => {
+  // Revoke specific token
+  revoke: async (req: Request, res: Response) => {
     const tokenId = req.params.tokenId;
     const userId = (req as any).user.id || (req as any).user_id;
 
@@ -71,4 +71,5 @@ export const tokenController = {
       client.release();
     }
   },
+
 };
