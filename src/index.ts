@@ -6,7 +6,7 @@ import helmet from "helmet";
 // replaced express-rate-limit with our redis-backed middleware
 import compression from "compression";
 import dotenv from "dotenv";
-
+import spdy from 'spdy';
 import https from "https";
 import fs from "fs";
 import path from "path";
@@ -39,7 +39,6 @@ import { vaultRoutes } from "./routes/vaults";
 import { adminRoutes } from "./routes/admin";
 import { makerCheckerRoutes } from "./routes/makerChecker";
 import { userRoutes } from "./routes/users";
-import { authRoutes } from "./routes/auth";
 import { errorHandler } from "./middleware/errorHandler";
 import {
   connectRedis,
@@ -100,7 +99,7 @@ if (process.env.SENTRY_DSN) {
   Sentry.setupExpressErrorHandler(app);
 }
 
-import rateLimitMiddleware from "./middleware/rateLimit";
+// import rateLimitMiddleware from "./middleware/rateLimit"; // TODO: Commented out because the module has no default export and I don't know each middleware was .
 
 app.use(sentryBreadcrumbMiddleware);
 
@@ -148,7 +147,7 @@ app.use(
     extended: true,
   }),
 );
-app.use(rateLimitMiddleware);
+// app.use(rateLimitMiddleware); 
 app.use(responseTime);
 app.use(requestId);
 app.use(i18nMiddleware);
@@ -314,7 +313,6 @@ app.use("/oauth", createOAuthRouter());
 app.use("/api/auth", authRoutes);
 
 app.use("/api/v1/transactions", transactionRoutesV1);
-app.use("/api/auth", authRoutes);
 app.use("/api/v1/transactions", transactionDisputeRoutesV1);
 app.use("/api/v1/transactions/bulk", bulkRoutesV1);
 app.use("/api/v1/disputes", disputeRoutesV1);
