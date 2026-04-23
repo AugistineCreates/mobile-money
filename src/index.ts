@@ -39,6 +39,7 @@ import { vaultRoutes } from "./routes/vaults";
 import { adminRoutes } from "./routes/admin";
 import { makerCheckerRoutes } from "./routes/makerChecker";
 import { userRoutes } from "./routes/users";
+import { auditRoutes } from "./routes/audit";
 import { errorHandler } from "./middleware/errorHandler";
 import {
   connectRedis,
@@ -347,6 +348,7 @@ app.use("/api/reports", reportsRoutes);
 app.use("/api/fees", feesRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/kyc", createKYCRoutes(pool));
+app.use("/api/audit", auditRoutes);
 
 app.use("/api/stellar", stellarRoutes);
 
