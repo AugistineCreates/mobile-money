@@ -7,6 +7,7 @@ import { runDisputeSlaJob } from "./disputeSlaJob";
 import { MonitoringService } from "../services/monitoringService";
 import { createPagerDutyService } from "../services/pagerDutyService";
 import { runProviderBalanceAlertJob } from "./balances";
+import { runStaleTransactionWatchdog } from "./staleTransactionWatchdog";
 
 interface JobConfig {
   name: string;
@@ -44,6 +45,12 @@ const JOBS: JobConfig[] = [
     // Every 10 minutes - checks MTN/Airtel operational balances and alerts treasury when low
     schedule: process.env.PROVIDER_BALANCE_ALERT_CRON || "*/10 * * * *",
     handler: runProviderBalanceAlertJob,
+  },
+  {
+    name: "stale-watchdog",
+    // Every hour - resolves or expires transactions pending > STALE_TRANSACTION_HOURS (default 12h)
+    schedule: process.env.STALE_WATCHDOG_CRON || "0 * * * *",
+    handler: runStaleTransactionWatchdog,
   },
 ];
 
