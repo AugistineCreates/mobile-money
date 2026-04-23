@@ -2,6 +2,12 @@ import { pool, queryRead, queryWrite } from "../config/database";
 import { generateReferenceNumber } from "../utils/referenceGenerator";
 import { encrypt, decrypt } from "../utils/encryption";
 import { WebSocketManager } from "../websocket";
+import { getRedisPubSub } from "../graphql/redisPubSub";
+import {
+  SubscriptionChannels,
+  transactionChannel,
+  type TransactionUpdatedPayload,
+} from "../graphql/subscriptions";
 
 export enum TransactionStatus {
   Pending = "pending",
@@ -385,12 +391,12 @@ export class TransactionModel {
   }
 
   async updateStatus(id: string, status: TransactionStatus): Promise<void> {
-    const result = await queryWrite<{ user_id: string | null }>(
+    const result = await queryWrite<{ user_id: string | null; reference_number: string; updated_at: Date }>(
       `UPDATE transactions
        SET status = $1,
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $2
-       RETURNING user_id`,
+       RETURNING user_id, reference_number, updated_at`,
       [status, id],
     );
 
@@ -398,6 +404,37 @@ export class TransactionModel {
       return;
     }
 
+    const row = result.rows[0];
+
+    // ── Publish GraphQL subscription event ──────────────────────────────
+    // Publish to both the per-transaction channel (targeted) and the
+    // broadcast channel (for clients watching all transactions).
+    const pubsub = getRedisPubSub();
+    const now = row.updated_at?.toISOString() ?? new Date().toISOString();
+
+    const payload: TransactionUpdatedPayload = {
+      id,
+      referenceNumber: row.reference_number,
+      status,
+      updatedAt: now,
+    };
+
+    // Per-transaction channel — clients subscribed to transactionUpdated(id: $id)
+    pubsub.publish(transactionChannel(id), payload).catch((err) => {
+      console.error(`[pubsub] Failed to publish ${transactionChannel(id)}`, err);
+    });
+
+    // Broadcast channels for status-specific subscriptions
+    if (status === TransactionStatus.Completed) {
+      pubsub.publish(SubscriptionChannels.TRANSACTION_COMPLETED, payload).catch(() => {});
+    } else if (status === TransactionStatus.Failed) {
+      pubsub.publish(SubscriptionChannels.TRANSACTION_FAILED, payload).catch(() => {});
+    }
+
+    // Generic updated broadcast
+    pubsub.publish(SubscriptionChannels.TRANSACTION_UPDATED, payload).catch(() => {});
+
+    // ── WebSocket broadcast (existing behaviour) ─────────────────────────
     const wsManager = WebSocketManager.getInstance();
     if (!wsManager) {
       return;
@@ -407,7 +444,7 @@ export class TransactionModel {
       await wsManager.broadcastTransactionUpdate({
         id,
         status,
-        userId: result.rows[0]?.user_id ?? null,
+        userId: row.user_id ?? null,
       });
     } catch (error) {
       console.error(

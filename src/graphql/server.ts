@@ -18,6 +18,7 @@ import {
   fieldExtensionsEstimator,
 } from "graphql-query-complexity";
 import { createAPQCache } from "./apqCache";
+import { verifyToken } from "../auth/jwt";
 
 // Merge resolvers with subscription resolvers
 const mergedResolvers = {
@@ -95,10 +96,40 @@ export async function startApolloServer(
       schema,
       context: (ctx: any) => {
         const req = ctx.extra.request as Request | undefined;
-        return buildGraphqlContext(req as Request);
+        const jwtClaims = ctx.extra.jwtClaims;
+        // Build base context from HTTP request, then overlay WS auth
+        const base = buildGraphqlContext(req as Request);
+        if (jwtClaims) {
+          base.auth = { authenticated: true, subject: jwtClaims.userId };
+        }
+        return base;
       },
-      onConnect: (_ctx: any) => {
-        console.log("WebSocket subscription connected");
+      onConnect: (ctx: any) => {
+        // ── JWT authentication on WS handshake ──────────────────────────
+        // Clients must pass: connectionParams: { authToken: "<jwt>" }
+        const token =
+          ctx.connectionParams?.authToken ||
+          ctx.connectionParams?.Authorization?.replace(/^Bearer\s+/i, "");
+
+        // Allow unauthenticated in dev when no GRAPHQL_API_KEY is set
+        const apiKeyRequired = !!process.env.GRAPHQL_API_KEY;
+
+        if (apiKeyRequired) {
+          if (!token) {
+            console.warn("[WS] Rejected unauthenticated connection — no authToken");
+            return false; // graphql-ws closes the connection
+          }
+          try {
+            const claims = verifyToken(String(token));
+            // Attach claims to context so subscription resolvers can access them
+            ctx.extra.jwtClaims = claims;
+            console.log(`[WS] Authenticated connection for user ${claims.userId}`);
+          } catch (err) {
+            console.warn("[WS] Rejected connection — invalid token:", (err as Error).message);
+            return false;
+          }
+        }
+
         return true;
       },
       onDisconnect: (_ctx: any) => {
