@@ -4,9 +4,11 @@ import { runCleanupJob } from "./cleanupJob";
 import { runReportJob } from "./reportJob";
 import { runStatusCheckJob } from "./statusCheckJob";
 import { runDisputeSlaJob } from "./disputeSlaJob";
+import { runSanctionSyncJob } from "./sanctionSyncJob";
 import { MonitoringService } from "../services/monitoringService";
 import { createPagerDutyService } from "../services/pagerDutyService";
 import { runProviderBalanceAlertJob } from "./balances";
+import { runStaleTransactionWatchdog } from "./staleTransactionWatchdog";
 
 interface JobConfig {
   name: string;
@@ -44,6 +46,12 @@ const JOBS: JobConfig[] = [
     // Every 10 minutes - checks MTN/Airtel operational balances and alerts treasury when low
     schedule: process.env.PROVIDER_BALANCE_ALERT_CRON || "*/10 * * * *",
     handler: runProviderBalanceAlertJob,
+  },
+  {
+    name: "sanction-sync",
+    // Daily at midnight - syncs global sanction lists for AML screening
+    schedule: process.env.SANCTION_SYNC_CRON || "0 0 * * *",
+    handler: runSanctionSyncJob,
   },
 ];
 
