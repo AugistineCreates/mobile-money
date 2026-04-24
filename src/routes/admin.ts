@@ -6,6 +6,7 @@ import {
   validateDashboardConfig,
   DASHBOARD_CONFIG_VALIDATION_ERRORS,
 } from "../utils/dashboardConfig";
+import { auditInterceptor } from "../middleware/auditInterceptor";
 import {
   rateLimitExport,
   rateLimitListQueries,
@@ -14,7 +15,7 @@ import {
 import { MobileMoneyService } from "../services/mobilemoney/mobileMoneyService";
 import { getQueueStats } from "../queue/transactionQueue";
 import { redisClient } from "../config/redis";
-import { checkReplicaHealth } from "../config/database";
+import { checkReplicaHealth, pool} from "../config/database";
 import { UserModel } from "../models/users";
 import multer from "multer";
 import {
@@ -32,8 +33,9 @@ import { dlqInspectorHandler } from "../queue/dlq";
 const router = Router();
 const IMPERSONATION_TOKEN_EXPIRES_IN = "15m";
 const IMPERSONATION_TOKEN_TTL_MS = 15 * 60 * 1000;
-const READ_ONLY_IMPERSONATION_MESSAGE =
-  "This token is read-only and cannot be used for mutations.";
+const READ_ONLY_IMPERSONATION_MESSAGE = "Read-only mode active";
+
+router.use(auditInterceptor(pool));
 
 // Multer configuration for CSV uploads
 const csvUpload = multer({
