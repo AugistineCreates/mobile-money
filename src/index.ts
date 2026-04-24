@@ -501,8 +501,12 @@ async function initializeRuntime(): Promise<void> {
 
   const { getQueueHealth, pauseQueueEndpoint, resumeQueueEndpoint } =
     await import("./queue/health");
+  const { queueDepthHandler, queueDepthPrometheusHandler } =
+    await import("./queue/queueDepthMetrics");
 
   app.get("/health/queue", getQueueHealth);
+  app.get("/health/queue/depth", queueDepthHandler);
+  app.get("/metrics/queue_depth", queueDepthPrometheusHandler);
   app.post("/admin/queues/pause", pauseQueueEndpoint);
   app.post("/admin/queues/resume", resumeQueueEndpoint);
 
