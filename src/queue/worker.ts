@@ -203,7 +203,7 @@ async function processTransaction(data: TransactionJobData): Promise<Transaction
           await transactionModel.updateMetadata(transactionId, updatedMetadata);
         }
 
-        await job.updateProgress(90);
+        await updateProgress(transactionId, 90);
   try {
     await updateProgress(transactionId, 10);
 

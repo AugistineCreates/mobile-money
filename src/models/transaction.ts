@@ -3,6 +3,7 @@ import { generateReferenceNumber } from "../utils/referenceGenerator";
 import { encrypt, decrypt } from "../utils/encryption";
 import { WebSocketManager } from "../websocket";
 
+export type AssetType = 'native' | 'credit_alphanum4' | 'credit_alphanum12';
 export enum TransactionStatus {
   Pending = "pending",
   Completed = "completed",
@@ -84,7 +85,6 @@ export interface Transaction {
   convertedAmount?: string;
   phoneNumber: string;
   provider: string;
-providerReference?: string | null;
   stellarAddress: string;
   status: TransactionStatus;
   // NEW fields
@@ -195,6 +195,19 @@ export function mapTransactionRow(
         ? String(db.user_id ?? r.userId)
         : null,
     retryCount: Number(db.retry_count ?? r.retryCount ?? 0),
+    // Add missing required properties with defaults
+    assetType: (r.asset_type ?? r.assetType ?? 'native') as AssetType,
+    assetCode: r.asset_code ?? r.assetCode ?? undefined,
+    assetIssuer: r.asset_issuer ?? r.assetIssuer ?? undefined,
+    currency: r.currency ?? 'USD',
+    originalAmount: r.original_amount ?? r.originalAmount ?? r.amount,
+    convertedAmount: r.converted_amount ?? r.convertedAmount ?? undefined,
+    idempotencyKey: r.idempotency_key ?? r.idempotencyKey ?? undefined,
+    idempotencyExpiresAt: r.idempotency_expires_at ?? r.idempotencyExpiresAt ? new Date(String(r.idempotency_expires_at ?? r.idempotencyExpiresAt)) : undefined,
+    webhook_delivery_status: r.webhook_delivery_status ?? undefined,
+    webhook_last_attempt_at: r.webhook_last_attempt_at ? new Date(String(r.webhook_last_attempt_at)) : undefined,
+    webhook_delivered_at: r.webhook_delivered_at ? new Date(String(r.webhook_delivered_at)) : undefined,
+    webhook_last_error: r.webhook_last_error ?? undefined,
     createdAt:
       created instanceof Date ? created : new Date(String(created ?? "")),
     updatedAt:
